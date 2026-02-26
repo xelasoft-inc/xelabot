@@ -52,11 +52,13 @@ async def proxy_mcp(request: Request, path: str = ""):
                        headers={k: v for k, v in resp.headers.items() if k.lower() not in ("transfer-encoding",)})
 PROXYCODE
 
-# Apply branding patches
+# Apply branding patches (only files that exist in the base image)
 RUN sed -i 's/VexaBot-{uuid}/Xela Bot/g' /app/bot-manager/app/orchestrator_utils.py && \
     sed -i 's/VexaBot-{uuid}/Xela Bot/g' /app/bot-manager/app/orchestrators/process.py && \
-    sed -i 's/Vexa Bot/Xela Bot/g' /app/vexa-bot/run-zoom-bot.sh && \
     echo "[branding] Bot name patched to 'Xela Bot'"
+
+# Copy xelasoft logo to replace vexa logo
+COPY services/vexa-bot/core/assets/vexa-logo-default.png /app/vexa-bot/assets/vexa-logo-default.png
 
 # Wrapper entrypoint: fix pydantic, then run original entrypoint
 RUN cat > /wrapper-entrypoint.sh <<'WRAPPER'
