@@ -1,14 +1,16 @@
 FROM vexaai/vexa-lite:latest
 
-# Fix pydantic v1/v2 .so binary conflict:
-# The pre-built image has compiled .so files from pydantic v1 that shadow the v2 .py files.
-# 1. Nuke the entire pydantic + pydantic_core directories
-# 2. Reinstall from scratch so only v2 files exist
+# Fix pydantic/fastapi compatibility:
+# The base image has Cython-compiled .so files for pydantic that shadow the .py modules.
+# The .so version of pydantic.main doesn't export IncEx (needed by fastapi).
+# Fix: nuke everything, reinstall, then delete .so files so Python uses .py modules.
 RUN rm -rf /usr/local/lib/python3.10/dist-packages/pydantic \
            /usr/local/lib/python3.10/dist-packages/pydantic_core \
            /usr/local/lib/python3.10/dist-packages/pydantic*.dist-info && \
-    pip3 install --no-cache-dir "pydantic>=2.0.0" "pydantic[email]" "pydantic-core" && \
-    python3 -c "from pydantic.main import IncEx; print('pydantic fix verified')"
+    pip3 install --no-cache-dir "pydantic>=2.0.0" "pydantic[email]" "pydantic-core" "pydantic-settings>=2.5.2" && \
+    find /usr/local/lib/python3.10/dist-packages/pydantic -name "*.so" -not -path "*/pydantic_core/*" -delete && \
+    python3 -c "from pydantic.main import IncEx; print('pydantic fix verified: IncEx importable')" && \
+    python3 -c "import pydantic; print(f'pydantic {pydantic.__version__}')"
 
 # Keep original entrypoint and command
 ENTRYPOINT ["/entrypoint.sh"]
