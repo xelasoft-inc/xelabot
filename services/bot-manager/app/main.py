@@ -2844,7 +2844,7 @@ async def proxy_mcp(request: Request, path: str = ""):
     """Proxy MCP requests to the MCP service."""
     async with httpx.AsyncClient() as client:
         target_path = f"/mcp{path}" if path else "/mcp"
-        url = f"{API_GATEWAY_INTERNAL}{target_path}"
+        url = f"{MCP_INTERNAL}{target_path}"
         resp = await client.request(
             method=request.method,
             url=url,
@@ -2854,6 +2854,7 @@ async def proxy_mcp(request: Request, path: str = ""):
             timeout=60.0,
         )
         return Response(content=resp.content, status_code=resp.status_code, headers=dict(resp.headers))
+
 async def _proxy_to_gateway(request: Request):
     """Forward a request to the API Gateway."""
     async with httpx.AsyncClient() as client:
