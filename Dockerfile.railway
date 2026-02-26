@@ -1,7 +1,10 @@
 FROM vexaai/vexa-lite:latest
 
-# Fix pydantic v1/v2 .so binary conflict: force reinstall to overwrite stale compiled modules
-RUN pip3 install --force-reinstall --no-cache-dir "pydantic>=2.0.0" "pydantic[email]" "pydantic-core"
+# Fix pydantic v1/v2 .so binary conflict:
+# The pre-built image has compiled .so files from pydantic v1 that shadow the v2 .py files.
+# Delete ALL pydantic .so files first, then reinstall cleanly.
+RUN find /usr/local/lib/python3.10/dist-packages/pydantic* -name "*.so" -delete 2>/dev/null; \
+    pip3 install --force-reinstall --no-cache-dir "pydantic>=2.0.0" "pydantic[email]" "pydantic-core"
 
 # Keep original entrypoint and command
 ENTRYPOINT ["/entrypoint.sh"]
