@@ -2854,13 +2854,9 @@ async def proxy_mcp(request: Request, path: str = ""):
             timeout=60.0,
         )
         return Response(content=resp.content, status_code=resp.status_code, headers=dict(resp.headers))
-@app.api_route("/meetings{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
-@app.api_route("/transcripts{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
-@app.api_route("/recording-config", methods=["GET", "PUT"])
-async def proxy_api_gateway(request: Request, path: str = ""):
-    """Proxy API Gateway endpoints for dashboard access (Railway single-port exposure)."""
+async def _proxy_to_gateway(request: Request):
+    """Forward a request to the API Gateway."""
     async with httpx.AsyncClient() as client:
-        # Reconstruct the full path from the request
         url = f"{API_GATEWAY_INTERNAL}{request.url.path}"
         resp = await client.request(
             method=request.method,
@@ -2871,6 +2867,22 @@ async def proxy_api_gateway(request: Request, path: str = ""):
             timeout=60.0,
         )
         return Response(content=resp.content, status_code=resp.status_code, headers=dict(resp.headers))
+
+@app.api_route("/meetings", methods=["GET", "POST"])
+async def proxy_meetings(request: Request):
+    return await _proxy_to_gateway(request)
+
+@app.api_route("/meetings/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def proxy_meetings_sub(request: Request, path: str):
+    return await _proxy_to_gateway(request)
+
+@app.api_route("/transcripts/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def proxy_transcripts(request: Request, path: str):
+    return await _proxy_to_gateway(request)
+
+@app.api_route("/recording-config", methods=["GET", "PUT"])
+async def proxy_recording_config(request: Request):
+    return await _proxy_to_gateway(request)
 # --- END Proxy Routes ---
 
 
