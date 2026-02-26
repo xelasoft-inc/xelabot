@@ -25,5 +25,15 @@ exec /entrypoint.sh "$@"
 WRAPPER
 RUN chmod +x /wrapper-entrypoint.sh
 
+# Copy modified source files over the base image versions
+COPY services/bot-manager/app/main.py /app/bot-manager/app/main.py
+COPY services/bot-manager/app/orchestrator_utils.py /app/bot-manager/app/orchestrator_utils.py
+COPY services/bot-manager/app/orchestrators/process.py /app/bot-manager/app/orchestrators/process.py
+COPY services/api-gateway/main.py /app/api-gateway/main.py
+COPY services/vexa-bot/run-zoom-bot.sh /app/vexa-bot/run-zoom-bot.sh
+COPY services/vexa-bot/core/assets/vexa-logo-default.png /app/vexa-bot/core/assets/vexa-logo-default.png
+COPY testing/bot.py /app/testing/bot.py
+COPY testing/core.py /app/testing/core.py
+
 ENTRYPOINT ["/wrapper-entrypoint.sh"]
 CMD ["supervisord", "-n", "-c", "/etc/supervisor/conf.d/vexa.conf"]
