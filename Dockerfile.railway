@@ -1,17 +1,29 @@
 FROM vexaai/vexa-lite:latest
 
-# Fix pydantic/fastapi compatibility:
-# The base image has Cython-compiled .so files for pydantic that shadow the .py modules.
-# The .so version of pydantic.main doesn't export IncEx (needed by fastapi).
-# Fix: nuke everything, reinstall, then delete .so files so Python uses .py modules.
-RUN rm -rf /usr/local/lib/python3.10/dist-packages/pydantic \
-           /usr/local/lib/python3.10/dist-packages/pydantic_core \
-           /usr/local/lib/python3.10/dist-packages/pydantic*.dist-info && \
-    pip3 install --no-cache-dir "pydantic>=2.0.0" "pydantic[email]" "pydantic-core" "pydantic-settings>=2.5.2" && \
-    find /usr/local/lib/python3.10/dist-packages/pydantic -name "*.so" -not -path "*/pydantic_core/*" -delete && \
-    python3 -c "from pydantic.main import IncEx; print('pydantic fix verified: IncEx importable')" && \
-    python3 -c "import pydantic; print(f'pydantic {pydantic.__version__}')"
+# Create a wrapper entrypoint that fixes pydantic at runtime before starting services.
+# Docker layer caching on Railway restores stale .so files at runtime,
+# so we must fix them on every container start.
+RUN cat > /usr/local/bin/fix-pydantic.sh <<'FIXSCRIPT'
+#!/bin/bash
+echo "[fix-pydantic] Removing Cython-compiled pydantic .so files..."
+find /usr/local/lib/python3.10/dist-packages/pydantic -name "*.so" -delete 2>/dev/null
+echo "[fix-pydantic] Verifying..."
+python3 -c "from pydantic.main import IncEx; print('[fix-pydantic] OK: IncEx importable')" || {
+    echo "[fix-pydantic] FAILED - reinstalling pydantic..."
+    pip3 install --no-cache-dir --force-reinstall "pydantic>=2.0.0" "pydantic[email]" "pydantic-core" "pydantic-settings>=2.5.2"
+    find /usr/local/lib/python3.10/dist-packages/pydantic -name "*.so" -delete 2>/dev/null
+    python3 -c "from pydantic.main import IncEx; print('[fix-pydantic] OK after reinstall')"
+}
+FIXSCRIPT
+RUN chmod +x /usr/local/bin/fix-pydantic.sh
 
-# Keep original entrypoint and command
-ENTRYPOINT ["/entrypoint.sh"]
+# Wrapper entrypoint: fix pydantic, then run original entrypoint
+RUN cat > /wrapper-entrypoint.sh <<'WRAPPER'
+#!/bin/bash
+/usr/local/bin/fix-pydantic.sh
+exec /entrypoint.sh "$@"
+WRAPPER
+RUN chmod +x /wrapper-entrypoint.sh
+
+ENTRYPOINT ["/wrapper-entrypoint.sh"]
 CMD ["supervisord", "-n", "-c", "/etc/supervisor/conf.d/vexa.conf"]
