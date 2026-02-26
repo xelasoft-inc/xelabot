@@ -17,21 +17,10 @@ python3 -c "from pydantic.main import IncEx; print('[fix-pydantic] OK: IncEx imp
 FIXSCRIPT
 RUN chmod +x /usr/local/bin/fix-pydantic.sh
 
-# Wrapper entrypoint: fix pydantic, swap gateway to port 8080 so Railway routes to it,
-# then run original entrypoint
+# Wrapper entrypoint: fix pydantic, then run original entrypoint
 RUN cat > /wrapper-entrypoint.sh <<'WRAPPER'
 #!/bin/bash
 /usr/local/bin/fix-pydantic.sh
-
-# Swap API gateway to port 8080 (Railway auto-detects this port) and bot-manager to 8081.
-# This ensures Railway routes all external traffic through the API gateway.
-CONF="/etc/supervisor/conf.d/vexa.conf"
-echo "[port-swap] Swapping API gateway to :8080 and bot-manager to :8081..."
-sed -i 's/--port 8080/--port 8081/g' "$CONF"
-sed -i 's/--port 8056/--port 8080/g' "$CONF"
-# Update bot-manager URL in gateway's environment (it now proxies to :8081)
-sed -i 's|BOT_MANAGER_URL="http://localhost:8080"|BOT_MANAGER_URL="http://localhost:8081"|g' "$CONF"
-
 exec /entrypoint.sh "$@"
 WRAPPER
 RUN chmod +x /wrapper-entrypoint.sh

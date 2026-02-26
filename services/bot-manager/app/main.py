@@ -2819,6 +2819,44 @@ async def _find_active_meeting(
 # --- END Voice Agent Endpoints ---
 
 
+# --- Proxy Routes for Admin API and MCP (Railway single-port exposure) ---
+ADMIN_API_INTERNAL = "http://localhost:8057"
+MCP_INTERNAL = "http://localhost:18888"
+API_GATEWAY_INTERNAL = "http://localhost:8056"
+
+@app.api_route("/admin/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def proxy_admin(request: Request, path: str):
+    """Proxy admin requests to the Admin API service."""
+    async with httpx.AsyncClient() as client:
+        url = f"{ADMIN_API_INTERNAL}/admin/{path}"
+        resp = await client.request(
+            method=request.method,
+            url=url,
+            headers={k: v for k, v in request.headers.items() if k.lower() not in ("host",)},
+            content=await request.body(),
+            params=request.query_params,
+            timeout=30.0,
+        )
+        return Response(content=resp.content, status_code=resp.status_code, headers=dict(resp.headers))
+
+@app.api_route("/mcp{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
+async def proxy_mcp(request: Request, path: str = ""):
+    """Proxy MCP requests to the MCP service."""
+    async with httpx.AsyncClient() as client:
+        target_path = f"/mcp{path}" if path else "/mcp"
+        url = f"{API_GATEWAY_INTERNAL}{target_path}"
+        resp = await client.request(
+            method=request.method,
+            url=url,
+            headers={k: v for k, v in request.headers.items() if k.lower() not in ("host",)},
+            content=await request.body(),
+            params=request.query_params,
+            timeout=60.0,
+        )
+        return Response(content=resp.content, status_code=resp.status_code, headers=dict(resp.headers))
+# --- END Proxy Routes ---
+
+
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
