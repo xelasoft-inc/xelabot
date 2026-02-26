@@ -1,5 +1,8 @@
 FROM vexaai/vexa-lite:latest
 
+# Cache buster - change this value to force a fresh build
+ARG CACHE_BUST=2026-02-26-v2
+
 # Create a wrapper entrypoint that fixes pydantic at runtime before starting services.
 # Docker layer caching on Railway restores stale .so files at runtime,
 # so we must fix them on every container start.
