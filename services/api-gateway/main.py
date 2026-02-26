@@ -97,6 +97,10 @@ app = FastAPI(
     # Note: Applying them globally or per-route is done below
 )
 
+@app.get("/health", tags=["System"])
+async def health_check():
+    return {"status": "ok", "service": "api-gateway"}
+
 # Custom OpenAPI Schema
 def custom_openapi():
     if app.openapi_schema:
