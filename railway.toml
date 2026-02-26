@@ -1,5 +1,5 @@
 [build]
-dockerfilePath = "Dockerfile.railway"
+dockerfilePath = "docker/lite/Dockerfile.xelabot-lite"
 
 [deploy]
 healthcheckPath = "/"
