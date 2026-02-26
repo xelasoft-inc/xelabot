@@ -17,6 +17,44 @@ python3 -c "from pydantic.main import IncEx; print('[fix-pydantic] OK: IncEx imp
 FIXSCRIPT
 RUN chmod +x /usr/local/bin/fix-pydantic.sh
 
+# Inject proxy routes for /admin/* and /mcp* into bot-manager (port 8080)
+# so Railway's single-port routing can reach admin API and MCP services.
+# Also patch branding: "Xela Bot" name in bot orchestrator files.
+RUN cat >> /app/bot-manager/app/main.py <<'PROXYCODE'
+
+# --- Proxy Routes for Admin API and MCP (Railway single-port exposure) ---
+import httpx as _httpx
+ADMIN_API_INTERNAL = "http://localhost:8057"
+MCP_INTERNAL = "http://localhost:18888"
+API_GW_INTERNAL = "http://localhost:8056"
+
+@app.api_route("/admin/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def proxy_admin(request: Request, path: str):
+    async with _httpx.AsyncClient() as client:
+        resp = await client.request(
+            method=request.method, url=f"{ADMIN_API_INTERNAL}/admin/{path}",
+            headers={k: v for k, v in request.headers.items() if k.lower() != "host"},
+            content=await request.body(), params=request.query_params, timeout=30.0)
+        return Response(content=resp.content, status_code=resp.status_code,
+                       headers={k: v for k, v in resp.headers.items() if k.lower() not in ("transfer-encoding",)})
+
+@app.api_route("/mcp{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
+async def proxy_mcp(request: Request, path: str = ""):
+    async with _httpx.AsyncClient() as client:
+        resp = await client.request(
+            method=request.method, url=f"{API_GW_INTERNAL}/mcp{path}",
+            headers={k: v for k, v in request.headers.items() if k.lower() != "host"},
+            content=await request.body(), params=request.query_params, timeout=60.0)
+        return Response(content=resp.content, status_code=resp.status_code,
+                       headers={k: v for k, v in resp.headers.items() if k.lower() not in ("transfer-encoding",)})
+PROXYCODE
+
+# Apply branding patches
+RUN sed -i 's/VexaBot-{uuid}/Xela Bot/g' /app/bot-manager/app/orchestrator_utils.py && \
+    sed -i 's/VexaBot-{uuid}/Xela Bot/g' /app/bot-manager/app/orchestrators/process.py && \
+    sed -i 's/Vexa Bot/Xela Bot/g' /app/vexa-bot/run-zoom-bot.sh && \
+    echo "[branding] Bot name patched to 'Xela Bot'"
+
 # Wrapper entrypoint: fix pydantic, then run original entrypoint
 RUN cat > /wrapper-entrypoint.sh <<'WRAPPER'
 #!/bin/bash
@@ -24,16 +62,6 @@ RUN cat > /wrapper-entrypoint.sh <<'WRAPPER'
 exec /entrypoint.sh "$@"
 WRAPPER
 RUN chmod +x /wrapper-entrypoint.sh
-
-# Copy modified source files over the base image versions
-COPY services/bot-manager/app/main.py /app/bot-manager/app/main.py
-COPY services/bot-manager/app/orchestrator_utils.py /app/bot-manager/app/orchestrator_utils.py
-COPY services/bot-manager/app/orchestrators/process.py /app/bot-manager/app/orchestrators/process.py
-COPY services/api-gateway/main.py /app/api-gateway/main.py
-COPY services/vexa-bot/run-zoom-bot.sh /app/vexa-bot/run-zoom-bot.sh
-COPY services/vexa-bot/core/assets/vexa-logo-default.png /app/vexa-bot/core/assets/vexa-logo-default.png
-COPY testing/bot.py /app/testing/bot.py
-COPY testing/core.py /app/testing/core.py
 
 ENTRYPOINT ["/wrapper-entrypoint.sh"]
 CMD ["supervisord", "-n", "-c", "/etc/supervisor/conf.d/vexa.conf"]
