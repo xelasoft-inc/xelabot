@@ -2854,6 +2854,23 @@ async def proxy_mcp(request: Request, path: str = ""):
             timeout=60.0,
         )
         return Response(content=resp.content, status_code=resp.status_code, headers=dict(resp.headers))
+@app.api_route("/meetings{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+@app.api_route("/transcripts{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+@app.api_route("/recording-config", methods=["GET", "PUT"])
+async def proxy_api_gateway(request: Request, path: str = ""):
+    """Proxy API Gateway endpoints for dashboard access (Railway single-port exposure)."""
+    async with httpx.AsyncClient() as client:
+        # Reconstruct the full path from the request
+        url = f"{API_GATEWAY_INTERNAL}{request.url.path}"
+        resp = await client.request(
+            method=request.method,
+            url=url,
+            headers={k: v for k, v in request.headers.items() if k.lower() not in ("host",)},
+            content=await request.body(),
+            params=request.query_params,
+            timeout=60.0,
+        )
+        return Response(content=resp.content, status_code=resp.status_code, headers=dict(resp.headers))
 # --- END Proxy Routes ---
 
 
