@@ -11,7 +11,7 @@
 set -e
 
 MEETING_URL="${ZOOM_MEETING_URL:-https://us05web.zoom.us/j/81137509581?pwd=swiL9I4MliS99mTVV1FXDCWsgaiRvy.1}"
-BOT_NAME="${ZOOM_BOT_NAME:-Vexa Bot}"
+BOT_NAME="${ZOOM_BOT_NAME:-Xela Bot}"
 REDIS_URL="${REDIS_URL:-redis://redis:6379/0}"
 WHISPER_LIVE_URL="${WHISPER_LIVE_URL:-ws://whisperlive:9090/ws}"
 ZOOM_CLIENT_ID="${ZOOM_CLIENT_ID:-6gMe9aY8R8OG1pqsmTFBBg}"

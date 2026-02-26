@@ -26,7 +26,7 @@ def create_user_client(user_api_key=None, base_url="http://localhost:18056", max
     return VexaClient(base_url=base_url, api_key=user_api_key)
 
 def request_bot(client, platform, native_meeting_id, passcode=None, 
-                bot_name="Vexa bot", language='en', task='transcribe'):
+                bot_name="Xela Bot", language='en', task='transcribe'):
     """Request a bot for a meeting."""
     return client.request_bot(
         platform=platform,

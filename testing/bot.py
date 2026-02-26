@@ -67,7 +67,7 @@ class Bot:
             return self.user_client.request_bot(
                 platform=self.platform,
                 native_meeting_id=self.native_meeting_id,
-                bot_name=bot_name or f"Vexa-{self.bot_id}",
+                bot_name=bot_name or f"Xela Bot-{self.bot_id}",
                 language=language,
                 task=task,
                 passcode=self.passcode
