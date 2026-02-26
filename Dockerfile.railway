@@ -1,7 +1,7 @@
 FROM vexaai/vexa-lite:latest
 
-# Fix pydantic v1/v2 conflict: shared_models requires v2 features
-RUN pip3 install --no-cache-dir --upgrade "pydantic>=2.0.0" "pydantic[email]"
+# Fix pydantic v1/v2 .so binary conflict: force reinstall to overwrite stale compiled modules
+RUN pip3 install --force-reinstall --no-cache-dir "pydantic>=2.0.0" "pydantic[email]" "pydantic-core"
 
 # Keep original entrypoint and command
 ENTRYPOINT ["/entrypoint.sh"]
