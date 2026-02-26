@@ -14,7 +14,7 @@ app = FastAPI()
 
 BASE_URL = os.getenv("API_GATEWAY_URL", "http://api-gateway:8000")
 
-# Standard bearer-token auth parsing. We treat the token value as the Vexa API key.
+# Standard bearer-token auth parsing. We treat the token value as the API key.
 bearer_scheme = HTTPBearer(auto_error=False)
 
 # ---------------------------
@@ -35,7 +35,7 @@ async def get_api_key(
     - Authorization: <token>
     - X-API-Key: <token>
 
-    The extracted token value is treated as the Vexa API key and forwarded to the REST API as X-API-Key.
+    The extracted token value is treated as the API key and forwarded to the REST API as X-API-Key.
     """
     token: Optional[str] = None
 
@@ -77,7 +77,7 @@ class RequestMeetingBot(BaseModel):
     meeting_url: Optional[str] = Field(
         None,
         description=(
-            "Full meeting URL. If provided, Vexa will parse it and extract platform/native_meeting_id/passcode.\n"
+            "Full meeting URL. If provided, Xela Bot will parse it and extract platform/native_meeting_id/passcode.\n"
             "Example (Teams Free): https://teams.live.com/meet/9361792952021?p=IXw5JhZRdoBvKnUXPy"
         ),
     )
@@ -278,7 +278,7 @@ async def parse_meeting_link(
     """
     Parse a meeting URL into platform/native_meeting_id/passcode.
 
-    This is useful for agents: users can paste the full meeting URL, and Vexa will extract the
+    This is useful for agents: users can paste the full meeting URL, and Xela Bot will extract the
     exact fields needed by the REST API.
     """
     _ = api_key  # Auth required for MCP usage, even though parsing doesn't call backend.
@@ -292,7 +292,7 @@ async def request_meeting_bot(
     api_key: str = Depends(get_api_key)
 ) -> Dict[str, Any]:
     """
-    Request a Vexa bot to join a meeting for transcription.
+    Request an Xela Bot to join a meeting for transcription.
     
     Args:
         native_meeting_id: The meeting identifier (see field description for platform-specific formats)
@@ -660,9 +660,9 @@ mcp = FastApiMCP(app, headers=["authorization", "x-api-key"])
 # MCP Prompts (agent guidance)
 # ---------------------------
 _PROMPTS: Dict[str, mcp_types.Prompt] = {
-    "vexa.meeting_prep": mcp_types.Prompt(
-        name="vexa.meeting_prep",
-        title="Vexa: Meeting Prep",
+    "xela.meeting_prep": mcp_types.Prompt(
+        name="xela.meeting_prep",
+        title="Xela Bot: Meeting Prep",
         description="Parse link, request bot, and attach meeting notes/metadata.",
         arguments=[
             mcp_types.PromptArgument(
@@ -687,27 +687,27 @@ _PROMPTS: Dict[str, mcp_types.Prompt] = {
             ),
         ],
     ),
-    "vexa.during_meeting": mcp_types.Prompt(
-        name="vexa.during_meeting",
-        title="Vexa: During Meeting",
+    "xela.during_meeting": mcp_types.Prompt(
+        name="xela.during_meeting",
+        title="Xela Bot: During Meeting",
         description="Check bot status and retrieve current transcript snapshot.",
         arguments=[
             mcp_types.PromptArgument(name="meeting_platform", description="google_meet | teams | zoom", required=True),
             mcp_types.PromptArgument(name="meeting_id", description="Native meeting ID", required=True),
         ],
     ),
-    "vexa.post_meeting": mcp_types.Prompt(
-        name="vexa.post_meeting",
-        title="Vexa: Post Meeting",
+    "xela.post_meeting": mcp_types.Prompt(
+        name="xela.post_meeting",
+        title="Xela Bot: Post Meeting",
         description="Fetch bundle (notes, recordings, share link) and produce follow-ups.",
         arguments=[
             mcp_types.PromptArgument(name="meeting_platform", description="google_meet | teams | zoom", required=True),
             mcp_types.PromptArgument(name="meeting_id", description="Native meeting ID", required=True),
         ],
     ),
-    "vexa.teams_link_help": mcp_types.Prompt(
-        name="vexa.teams_link_help",
-        title="Vexa: Teams Link Help",
+    "xela.teams_link_help": mcp_types.Prompt(
+        name="xela.teams_link_help",
+        title="Xela Bot: Teams Link Help",
         description="Supported Teams links and passcode requirements (issues #105/#110).",
         arguments=[
             mcp_types.PromptArgument(name="meeting_url", description="Teams meeting URL from the user", required=False),
@@ -728,19 +728,19 @@ async def _get_prompt(name: str, arguments: Optional[Dict[str, str]] = None) -> 
     def t(text: str) -> mcp_types.TextContent:
         return mcp_types.TextContent(type="text", text=text)
 
-    if name == "vexa.meeting_prep":
+    if name == "xela.meeting_prep":
         meeting_url = (args.get("meeting_url") or "").strip()
         meeting_platform = (args.get("meeting_platform") or "").strip()
         meeting_id = (args.get("meeting_id") or "").strip()
         notes = (args.get("notes") or "").strip()
 
         return mcp_types.GetPromptResult(
-            description="Meeting prep flow using Vexa MCP tools.",
+            description="Meeting prep flow using Xela Bot MCP tools.",
             messages=[
                 mcp_types.PromptMessage(
                     role="user",
                     content=t(
-                        "You are helping me prepare a meeting using Vexa.\n\n"
+                        "You are helping me prepare a meeting using Xela Bot.\n\n"
                         "Goals:\n"
                         "1. Identify meeting platform + native meeting id (+ passcode if needed).\n"
                         "2. Request the meeting bot (idempotent).\n"
@@ -762,16 +762,16 @@ async def _get_prompt(name: str, arguments: Optional[Dict[str, str]] = None) -> 
             ],
         )
 
-    if name == "vexa.during_meeting":
+    if name == "xela.during_meeting":
         meeting_platform = (args.get("meeting_platform") or "").strip()
         meeting_id = (args.get("meeting_id") or "").strip()
         return mcp_types.GetPromptResult(
-            description="During-meeting helper prompt using Vexa MCP tools.",
+            description="During-meeting helper prompt using Xela Bot MCP tools.",
             messages=[
                 mcp_types.PromptMessage(
                     role="user",
                     content=t(
-                        "You are my during-meeting assistant using Vexa.\n\n"
+                        "You are my during-meeting assistant using Xela Bot.\n\n"
                         f"Meeting: platform={meeting_platform}, id={meeting_id}\n\n"
                         "Steps:\n"
                         "- Call `get_bot_status` to confirm the bot is active / requested.\n"
@@ -784,16 +784,16 @@ async def _get_prompt(name: str, arguments: Optional[Dict[str, str]] = None) -> 
             ],
         )
 
-    if name == "vexa.post_meeting":
+    if name == "xela.post_meeting":
         meeting_platform = (args.get("meeting_platform") or "").strip()
         meeting_id = (args.get("meeting_id") or "").strip()
         return mcp_types.GetPromptResult(
-            description="Post-meeting helper prompt using Vexa MCP tools.",
+            description="Post-meeting helper prompt using Xela Bot MCP tools.",
             messages=[
                 mcp_types.PromptMessage(
                     role="user",
                     content=t(
-                        "You are my post-meeting assistant using Vexa.\n\n"
+                        "You are my post-meeting assistant using Xela Bot.\n\n"
                         f"Meeting: platform={meeting_platform}, id={meeting_id}\n\n"
                         "Steps:\n"
                         "- Call `get_meeting_bundle` (segments off) to fetch meeting status, notes, recordings, and share link.\n"
@@ -808,7 +808,7 @@ async def _get_prompt(name: str, arguments: Optional[Dict[str, str]] = None) -> 
             ],
         )
 
-    if name == "vexa.teams_link_help":
+    if name == "xela.teams_link_help":
         meeting_url = (args.get("meeting_url") or "").strip()
         return mcp_types.GetPromptResult(
             description="Teams link troubleshooting prompt.",
@@ -816,7 +816,7 @@ async def _get_prompt(name: str, arguments: Optional[Dict[str, str]] = None) -> 
                 mcp_types.PromptMessage(
                     role="user",
                     content=t(
-                        "Help me troubleshoot a Microsoft Teams meeting link for Vexa.\n\n"
+                        "Help me troubleshoot a Microsoft Teams meeting link for Xela Bot.\n\n"
                         f"User link: {meeting_url or '(none provided)'}\n\n"
                         "Checklist:\n"
                         "- If link is `teams.live.com/meet/<id>?p=<passcode>`:\n"

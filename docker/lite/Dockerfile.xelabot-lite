@@ -1,0 +1,297 @@
+# =============================================================================
+# Xelabot Lite - All-in-One Docker Image
+# =============================================================================
+#
+# This Dockerfile creates a single container with all services:
+# - API Gateway (port 8056)
+# - Admin API (port 8057)
+# - Bot Manager (port 8080, with proxy routes for /admin/* and /mcp*)
+# - Transcription Collector
+# - WhisperLive (CPU-based transcription)
+# - Vexa Bot (Node.js/Playwright)
+# - MCP Service (port 18888)
+#
+# Designed for simple deployments on platforms like Railway, EasyPanel, etc.
+# where Docker socket access is not available.
+#
+# Build:
+#   docker build -f docker/lite/Dockerfile.xelabot-lite -t xelabot-lite .
+#
+# Run:
+#   docker run -d \
+#     -p 8080:8080 \
+#     -e REDIS_HOST=your-redis-host \
+#     -e DB_HOST=your-postgres-host \
+#     -e DB_PASSWORD=your-password \
+#     -e ADMIN_API_TOKEN=your-secret-token \
+#     xelabot-lite
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Base Image: Playwright with browsers pre-installed
+# -----------------------------------------------------------------------------
+FROM mcr.microsoft.com/playwright:v1.56.0-jammy AS base
+
+# Avoid prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+# Using --fix-missing to handle transient hash mismatches from Ubuntu repos
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends --fix-missing \
+    # Python 3.10+
+    python3 \
+    python3-pip \
+    python3-venv \
+    python3-dev \
+    # Build tools (needed for some Python packages)
+    build-essential \
+    gcc \
+    g++ \
+    # Audio/Video processing
+    xvfb \
+    pulseaudio \
+    ffmpeg \
+    libsndfile1 \
+    # Process management
+    supervisor \
+    # Database clients (for health checks and migrations)
+    postgresql-client \
+    redis-tools \
+    # Redis server (for internal Redis)
+    redis-server \
+    # Utilities
+    curl \
+    wget \
+    git \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && usermod -aG pulse-access root
+
+# Create directory structure
+WORKDIR /app
+RUN mkdir -p \
+    /app/api-gateway \
+    /app/admin-api \
+    /app/bot-manager \
+    /app/transcription-collector \
+    /app/whisperlive \
+    /app/vexa-bot \
+    /app/mcp \
+    /app/tts-service \
+    /app/shared-models \
+    /app/alembic \
+    /var/log/supervisor \
+    /var/log/vexa-bots \
+    /var/lib/redis \
+    /var/run/redis
+
+# -----------------------------------------------------------------------------
+# Python Dependencies Stage
+# -----------------------------------------------------------------------------
+
+# Copy requirements files first
+COPY docker/lite/requirements.txt /tmp/requirements.txt
+COPY services/WhisperLive/requirements/server.txt /tmp/requirements-whisperlive.txt
+COPY services/mcp/requirements.txt /tmp/requirements-mcp.txt
+
+# Install consolidated Python dependencies for all services
+RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
+
+# MCP service dependencies
+# Note: fastapi-mcp requires pydantic>=2.0.0, so we upgrade pydantic here
+RUN pip3 install --no-cache-dir --upgrade pydantic>=2.0.0 && \
+    pip3 install --no-cache-dir -r /tmp/requirements-mcp.txt
+
+# WhisperLive dependencies (CPU version)
+# Note: openai-whisper and onnxruntime GPU versions are excluded
+RUN sed -i '/openai-whisper/d' /tmp/requirements-whisperlive.txt || true \
+    && sed -i '/onnxruntime==/d' /tmp/requirements-whisperlive.txt || true \
+    && pip3 install --no-cache-dir -r /tmp/requirements-whisperlive.txt \
+    && pip3 install --no-cache-dir onnxruntime \
+    && pip3 install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu \
+    && pip3 install --no-cache-dir 'faster-whisper[cpu]'
+
+# Clean up requirements files
+RUN rm -f /tmp/requirements-*.txt
+
+# Copy shared library
+COPY libs/shared-models /app/shared-models
+
+# Add shared_models to Python path (more reliable than pip install)
+ENV PYTHONPATH="/app/shared-models${PYTHONPATH:+:${PYTHONPATH}}"
+
+# Verify shared_models is importable
+RUN python3 -c "import shared_models; print(f'shared_models found at: {shared_models.__file__}')" \
+    && python3 -c "from shared_models.models import User, Meeting; print('Models imported successfully')"
+
+# -----------------------------------------------------------------------------
+# Application Code
+# -----------------------------------------------------------------------------
+
+# API Gateway
+COPY services/api-gateway/ /app/api-gateway/
+
+# Admin API
+COPY services/admin-api/ /app/admin-api/
+
+# Bot Manager (including the new process orchestrator)
+COPY services/bot-manager/app/ /app/bot-manager/app/
+
+# Transcription Collector
+COPY services/transcription-collector/ /app/transcription-collector/
+
+# WhisperLive
+COPY services/WhisperLive/ /app/whisperlive/
+
+# MCP Service
+COPY services/mcp/ /app/mcp/
+
+# TTS Service
+COPY services/tts-service/ /app/tts-service/
+
+# Alembic migrations
+COPY alembic.ini /app/alembic.ini
+COPY libs/shared-models/alembic/ /app/alembic/
+
+# -----------------------------------------------------------------------------
+# Node.js Bot Build
+# -----------------------------------------------------------------------------
+
+# Copy vexa-bot source
+COPY services/vexa-bot/core/ /app/vexa-bot/
+
+# Build the bot
+WORKDIR /app/vexa-bot
+RUN npm ci --omit=dev 2>/dev/null || npm install \
+    && npm run build
+
+# Install additional browsers for Teams support
+RUN npx playwright install msedge --with-deps || true
+
+# Ensure browser-utils is built
+RUN node build-browser-utils.js || true
+
+# Return to app directory
+WORKDIR /app
+
+# -----------------------------------------------------------------------------
+# Pydantic Runtime Fix
+# -----------------------------------------------------------------------------
+# The Dockerfile installs pydantic v1 (via requirements.txt) then upgrades to v2.
+# Docker layer caching can restore stale Cython-compiled .so files from the v1
+# layer at runtime, causing ImportError. This wrapper script deletes them on
+# every container start.
+
+RUN cat > /usr/local/bin/fix-pydantic.sh <<'FIXSCRIPT'
+#!/bin/bash
+echo "[fix-pydantic] Removing Cython-compiled pydantic .so files..."
+find /usr/local/lib/python3.10/dist-packages/pydantic -name "*.so" -delete 2>/dev/null
+echo "[fix-pydantic] Verifying..."
+python3 -c "from pydantic.main import IncEx; print('[fix-pydantic] OK: IncEx importable')" || {
+    echo "[fix-pydantic] FAILED - reinstalling pydantic..."
+    pip3 install --no-cache-dir --force-reinstall "pydantic>=2.0.0" "pydantic[email]" "pydantic-core" "pydantic-settings>=2.5.2"
+    find /usr/local/lib/python3.10/dist-packages/pydantic -name "*.so" -delete 2>/dev/null
+    python3 -c "from pydantic.main import IncEx; print('[fix-pydantic] OK after reinstall')"
+}
+FIXSCRIPT
+RUN chmod +x /usr/local/bin/fix-pydantic.sh
+
+# -----------------------------------------------------------------------------
+# Configuration Files
+# -----------------------------------------------------------------------------
+
+# Supervisor configuration
+COPY docker/lite/supervisord.conf /etc/supervisor/conf.d/vexa.conf
+
+# Entrypoint script
+COPY docker/lite/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+RUN mkdir -p /var/lib/vexa/recordings /var/log/vexa-bots
+
+# Wrapper entrypoint: fix pydantic, then run original entrypoint
+RUN cat > /wrapper-entrypoint.sh <<'WRAPPER'
+#!/bin/bash
+/usr/local/bin/fix-pydantic.sh
+exec /entrypoint.sh "$@"
+WRAPPER
+RUN chmod +x /wrapper-entrypoint.sh
+
+# -----------------------------------------------------------------------------
+# Environment Variables (defaults)
+# -----------------------------------------------------------------------------
+
+# Orchestrator configuration
+ENV ORCHESTRATOR=process \
+    BOT_SCRIPT_PATH=/app/vexa-bot/dist/docker.js \
+    BOT_WORKING_DIR=/app/vexa-bot \
+    BOT_CALLBACK_BASE_URL=http://localhost:8080
+
+# TTS Service (requires OPENAI_API_KEY at runtime)
+ENV TTS_SERVICE_URL=http://localhost:8059 \
+    OPENAI_API_KEY=
+
+# WhisperLive configuration
+ENV WHISPER_LIVE_URL=ws://localhost:9090 \
+    DEVICE_TYPE=cpu \
+    WHISPER_MODEL_SIZE=tiny \
+    CONSUL_ENABLE=false
+
+# Display for headless browsers
+ENV DISPLAY=:99
+
+# Logging
+ENV LOG_LEVEL=info \
+    PYTHONUNBUFFERED=1
+
+# Recording storage defaults (lite)
+# Default to local filesystem for single-container deployments.
+ENV STORAGE_BACKEND=local \
+    LOCAL_STORAGE_DIR=/var/lib/vexa/recordings \
+    LOCAL_STORAGE_FSYNC=true \
+    MINIO_ENDPOINT= \
+    MINIO_ACCESS_KEY= \
+    MINIO_SECRET_KEY= \
+    MINIO_BUCKET=vexa-recordings \
+    MINIO_SECURE=false \
+    AWS_REGION=us-east-1 \
+    AWS_ACCESS_KEY_ID= \
+    AWS_SECRET_ACCESS_KEY= \
+    S3_BUCKET= \
+    S3_ENDPOINT= \
+    S3_SECURE=true
+
+# Database defaults (should be overridden)
+# Note: DB_PASSWORD must be provided at runtime via -e flag
+ENV DB_HOST=localhost \
+    DB_PORT=5432 \
+    DB_NAME=vexa \
+    DB_USER=postgres
+
+# Redis defaults (should be overridden)
+ENV REDIS_HOST=localhost \
+    REDIS_PORT=6379
+
+# -----------------------------------------------------------------------------
+# Ports
+# -----------------------------------------------------------------------------
+
+# API Gateway (internal services route through here)
+EXPOSE 8056
+# Bot Manager (main entry point for Railway - proxy routes for /admin/* and /mcp*)
+EXPOSE 8080
+
+# -----------------------------------------------------------------------------
+# Health Check
+# -----------------------------------------------------------------------------
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
+    CMD curl -sf http://localhost:8056/docs > /dev/null || exit 1
+
+# -----------------------------------------------------------------------------
+# Entrypoint
+# -----------------------------------------------------------------------------
+
+ENTRYPOINT ["/wrapper-entrypoint.sh"]
+CMD ["supervisord", "-n", "-c", "/etc/supervisor/conf.d/vexa.conf"]
